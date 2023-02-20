@@ -1,0 +1,16 @@
+version: 0.2
+
+phases: # Different phases
+  install:
+    runtime-versions: # install python "is optional"
+      python: 3.8
+  build: # building our template
+    commands:
+      - echo Building my Comcast Web...
+      - aws cloudformation package --template-file Apache-Webserver_Final.yml --s3-bucket my-deploy-bucket1 --output-template-file OutputTemplate.yaml
+      - echo Template has been packaged successfully 
+
+artifacts: # Zipup everything build artifact for next stage
+  files: # Source artifact 
+    - Apache-Webserver_Final.yml
+    - OutputTemplate.yaml

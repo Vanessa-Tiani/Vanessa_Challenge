@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template to Create an EC2 instance in a VPC
+Parameters:
+  AvailabilityZone:
+    Type: String
+    Description: Availability Zone into which instance will launch
+    Default: us-east-1a
+  InstanceType:
+    Type: String
+    Description: Choosing  t2 micro because it is free
+    Default: t2.micro
+  KeyName:
+    Description: Please select a key pair value
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: Comcast-Key-EC2
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: '9'
+    MaxLength: '18'
+    Default: 108.44.202.123/32
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+  SSLCertificate:
+    Description: Arn of the ssl certificate for HTTPS listener
+    Type: String
+    Default: arn:aws:acm:us-east-1:348976436176:certificate/b574748f-9284-4743-b4d2-153f8cc01587
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      CidrBlock: 10.0.0.0/16
+      Tags:
+      - Key: Name
+        Value: Comcast-VPC
+  MySubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: us-east-1a
+      Tags:
+      - Key: Name
+        Value: Comcast-Subnet1
+  MySubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Ref: VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: us-east-1b
+      Tags:
+      - Key: Name
+        Value: Comcast-Subnet2
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Ref: VPC
+      Tags:
+      - Key: Name
+        Value: Comcast-RouteTable
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: Comcast-igw
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Ref: VPC
+      InternetGatewayId:
+        Ref: InternetGateway
+  InternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: InternetGateway
+      RouteTableId:
+        Ref: RouteTable
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+    - InternetRoute
+    - MySubnet
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      SubnetId:
+        Ref: MySubnet
+  SubnetARouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    DependsOn:
+    - InternetRoute
+    - MySubnet2
+    Properties:
+      RouteTableId:
+        Ref: RouteTable
+      SubnetId:
+        Ref: MySubnet2
+  WebServerInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId:
+        Ref: ImageId
+      InstanceType:
+        Ref: InstanceType
+      AvailabilityZone:
+        Ref: AvailabilityZone
+      KeyName:
+        Ref: KeyName
+      NetworkInterfaces:
+      - AssociatePublicIpAddress: true
+        SubnetId:
+          Ref: MySubnet
+        DeviceIndex: 0
+        Description: Instance_A_Mgmt_Interface
+        GroupSet:
+        - Ref: WebServerSecurityGroup
+      UserData:
+        Fn::Base64: "#!/bin/bash -xe\nyum update -y # good practice to update existing\
+          \ packages\nyum install -y httpd # install web server \nsystemctl start\
+          \ httpd #Start the Apache server\nsystemctl enable httpd #Enable the Apache\
+          \ Server\necho \"<html><head><title>Hello World</title>\n      </head><body><h1>Hello\
+          \ World!</h1></body>\n      </html>\" > /var/www/html/index.html #Copy into\
+          \ the index.html\n"
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable HTTP, HTTPS ingress
+      VpcId:
+        Ref: VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        CidrIp: 0.0.0.0/0
+  WebServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId:
+        Ref: VPC
+      GroupDescription: Enable HTTP access via port 80, SSH on port 22 and HTTPS 443
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: '80'
+        ToPort: '80'
+        SourceSecurityGroupId:
+          Ref: ALBSecurityGroup
+      - IpProtocol: tcp
+        FromPort: '443'
+        ToPort: '443'
+        SourceSecurityGroupId:
+          Ref: ALBSecurityGroup
+      - IpProtocol: tcp
+        FromPort: 22
+        ToPort: 22
+        CidrIp:
+          Ref: SSHLocation
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: comcast-Application-ELB
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+      - Ref: MySubnet
+      - Ref: MySubnet2
+      SecurityGroups:
+      - Ref: ALBSecurityGroup
+      IpAddressType: ipv4
+  HTTPlistener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+      - Type: redirect
+        RedirectConfig:
+          Protocol: HTTPS
+          Port: '443'
+          Host: '#{host}'
+          Path: /#{path}
+          Query: '#{query}'
+          StatusCode: HTTP_301
+      LoadBalancerArn:
+        Ref: ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+  Listener443:
+    DependsOn:
+    - ApplicationLoadBalancer
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      Certificates:
+      - CertificateArn:
+          Ref: SSLCertificate
+      LoadBalancerArn:
+        Ref: ApplicationLoadBalancer
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn:
+          Ref: ELBTargetGroup
+      Port: 443
+      Protocol: HTTPS
+  ELBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      Port: 80
+      Protocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      UnhealthyThresholdCount: 2
+      TargetType: instance
+      Matcher:
+        HttpCode: '200'
+      HealthyThresholdCount: 5
+      VpcId:
+        Ref: VPC
+      Targets:
+      - Id:
+          Ref: WebServerInstance
+        Port: 80
+      Name: target-group-1
+      HealthCheckEnabled: true
+  MyEIP:
+    Type: AWS::EC2::EIP
+    Description: Create an Elastic IP
+  EIPAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Description: Associate the Elastic IP to ec2 instance.
+    Properties:
+      InstanceId:
+        Ref: WebServerInstance
+      EIP:
+        Ref: MyEIP
+Outputs:
+  Instanceid:
+    Description: Display the instance id of the newly created ec2 instance.
+    Value:
+      Fn::GetAtt:
+      - WebServerInstance
+      - PublicIp
+  VpcId:
+    Description: The VPC ID
+    Value:
+      Ref: VPC
+  MyEIP:
+    Description: The EIP ID
+    Value:
+      Ref: MyEIP
+  MySubnet1:
+    Description: My subnet 01
+    Value:
+      Ref: MySubnet
+  MySubnet2:
+    Description: My subnet 02
+    Value:
+      Ref: MySubnet2
+  MyELBDNSName:
+    Description: My ELB DNS
+    Value:
+      Fn::GetAtt:
+      - ApplicationLoadBalancer
+      - DNSName
