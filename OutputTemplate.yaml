@@ -1,5 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Template to Create an EC2 instance in a VPC
+
+#Set up the parameters
 Parameters:
   AvailabilityZone:
     Type: String
@@ -28,7 +30,10 @@ Parameters:
     Description: Arn of the ssl certificate for HTTPS listener
     Type: String
     Default: arn:aws:acm:us-east-1:348976436176:certificate/b574748f-9284-4743-b4d2-153f8cc01587
+
+#Code to spin up resources
 Resources:
+#Create VPC
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -38,6 +43,8 @@ Resources:
       Tags:
       - Key: Name
         Value: Comcast-VPC
+
+  #Create Subnet1 in us-east-1a AZ
   MySubnet:
     Type: AWS::EC2::Subnet
     Properties:
@@ -48,6 +55,8 @@ Resources:
       Tags:
       - Key: Name
         Value: Comcast-Subnet1
+  
+   #Create Subnet2 in us-east-1b AZ
   MySubnet2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -58,6 +67,8 @@ Resources:
       Tags:
       - Key: Name
         Value: Comcast-Subnet2
+
+   #Create Route table from the VPC
   RouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -66,12 +77,16 @@ Resources:
       Tags:
       - Key: Name
         Value: Comcast-RouteTable
+  
+  #Create the IG 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
       - Key: Name
         Value: Comcast-igw
+  
+  #Attach IG to the VPC
   VPCGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
@@ -79,6 +94,8 @@ Resources:
         Ref: VPC
       InternetGatewayId:
         Ref: InternetGateway
+  
+  #Attach the IG to the route table
   InternetRoute:
     Type: AWS::EC2::Route
     DependsOn: VPCGatewayAttachment
@@ -88,6 +105,8 @@ Resources:
         Ref: InternetGateway
       RouteTableId:
         Ref: RouteTable
+  
+  #Associate Subnet1 to Route table
   SubnetARouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     DependsOn:
@@ -98,6 +117,8 @@ Resources:
         Ref: RouteTable
       SubnetId:
         Ref: MySubnet
+  
+  #Associate Subnet2 to Route table
   SubnetARouteTableAssociation2:
     Type: AWS::EC2::SubnetRouteTableAssociation
     DependsOn:
@@ -108,6 +129,8 @@ Resources:
         Ref: RouteTable
       SubnetId:
         Ref: MySubnet2
+
+  #Spin up the EC2 instance, create the httpd server and add user data 
   WebServerInstance:
     Type: AWS::EC2::Instance
     Properties:
@@ -134,6 +157,8 @@ Resources:
           \ Server\necho \"<html><head><title>Hello World</title>\n      </head><body><h1>Hello\
           \ World!</h1></body>\n      </html>\" > /var/www/html/index.html #Copy into\
           \ the index.html\n"
+  
+  #Create the ALB Security group and enable http and https
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -149,6 +174,8 @@ Resources:
         FromPort: '443'
         ToPort: '443'
         CidrIp: 0.0.0.0/0
+
+  #Create the ECS Security group and enable http, ssh and https
   WebServerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -171,6 +198,8 @@ Resources:
         ToPort: 22
         CidrIp:
           Ref: SSHLocation
+
+#Spin up or launch the ELB and attach the 2 subnets, the ALB security group
   ApplicationLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -183,6 +212,8 @@ Resources:
       SecurityGroups:
       - Ref: ALBSecurityGroup
       IpAddressType: ipv4
+
+#Create a HTTP listener that listens to port 80 and defines the rules for ELB
   HTTPlistener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -199,7 +230,9 @@ Resources:
         Ref: ApplicationLoadBalancer
       Port: 80
       Protocol: HTTP
-  Listener443:
+  
+ #Create a HTTPS listener that listens to port 443 and defines the rules for ELB 
+  HTTPSListener:
     DependsOn:
     - ApplicationLoadBalancer
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -215,6 +248,8 @@ Resources:
           Ref: ELBTargetGroup
       Port: 443
       Protocol: HTTPS
+  
+  #Create the target group and atttach the EC2 instance or target
   ELBTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -236,6 +271,8 @@ Resources:
         Port: 80
       Name: target-group-1
       HealthCheckEnabled: true
+
+#Create the Elastic IP and attach it to the EC2
   MyEIP:
     Type: AWS::EC2::EIP
     Description: Create an Elastic IP
@@ -247,6 +284,8 @@ Resources:
         Ref: WebServerInstance
       EIP:
         Ref: MyEIP
+
+#Output the publicIp, instanceID, VPID, EIP, Subnet 1 and 2 and ELB DNS
 Outputs:
   Instanceid:
     Description: Display the instance id of the newly created ec2 instance.
